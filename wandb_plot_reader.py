@@ -91,7 +91,37 @@ class WandbPlotReader:
         if isinstance(run, str):
             run = self.get_run(run, project=project)
 
-        history = run.history(samples=samples, keys=keys)
+        # If keys are specified, check which ones are available in the run's history
+        available_keys = None
+        if keys is not None:
+            # Get available keys from run.history_keys or by fetching a small sample
+            try:
+                # Try to get available keys from the run's scan_history
+                available_history_keys = set(run.scan_history(page_size=1, keys=None).__next__().keys())
+            except (StopIteration, AttributeError):
+                # Fallback: fetch without keys to see what's available
+                available_history_keys = set(run.history(samples=1).columns)
+
+            # Filter to only request keys that exist
+            available_keys = [k for k in keys if k in available_history_keys]
+            missing_keys = set(keys) - available_history_keys
+
+            if missing_keys:
+                print(f"Warning: Keys {missing_keys} not found in run {run.name}, skipping them")
+
+        # Fetch history with only available keys
+        history = run.history(samples=samples, keys=available_keys)
+
+        # Ensure we have a DataFrame
+        if not isinstance(history, pd.DataFrame):
+            history = pd.DataFrame(history)
+
+        # Add missing keys as NaN columns so the structure is consistent
+        if keys is not None:
+            for key in keys:
+                if key not in history.columns:
+                    history[key] = pd.NA
+
         return history
 
     def get_run_summary(
